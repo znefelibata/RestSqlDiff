@@ -10,6 +10,12 @@ application {
     mainClass.set('io.resttestgen.boot.cli.App')
 }
 
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(11)
+    }
+}
+
 repositories {
     mavenCentral()
 }
@@ -49,6 +55,7 @@ test {
 
 tasks.withType(JavaCompile) {
     options.encoding = "UTF-8"
+    options.release = 11
 }
 
 jar {

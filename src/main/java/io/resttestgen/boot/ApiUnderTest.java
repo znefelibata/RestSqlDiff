@@ -117,18 +117,38 @@ public class ApiUnderTest {
             setHost(this.host = apiConfigMap.get("host").toString());
         }
         if (apiConfigMap.get("authenticationCommands") != null) {
-            this.authenticationCommands = (LinkedHashMap<String, String>) apiConfigMap.get("authenticationCommands");
+            try {
+                // Safely convert the map to Map<String, String> ensuring all values are Strings
+                Object authCmdsObj = apiConfigMap.get("authenticationCommands");
+                if (authCmdsObj instanceof Map) {
+                    Map<?, ?> rawAuthMap = (Map<?, ?>) authCmdsObj;
+                    this.authenticationCommands = new LinkedHashMap<>();
+                    for (Map.Entry<?, ?> entry : rawAuthMap.entrySet()) {
+                        this.authenticationCommands.put(String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
+                    }
+
 //            for (String description : this.authenticationCommands.keySet()) {
 //                this.authenticationInfoMap.put(description, new AuthenticationInfo(description, this.authenticationCommands.get(description)));
 //            }
-            String description = authenticationCommands.get("name");
-            String parameterName = authenticationCommands.get("name");
-            String value = authenticationCommands.get("value");
-            String in = authenticationCommands.get("in");
-            String duration = authenticationCommands.get("duration");
-            this.authenticationInfoMap.put(description, new AuthenticationInfo(description,
-                    new ParameterName(parameterName), value, ParameterLocation.getLocationFromString(in),
-                    Long.parseLong(duration)));
+                    String description = authenticationCommands.get("name");
+                    String parameterName = authenticationCommands.get("name");
+                    String value = authenticationCommands.get("value");
+                    String in = authenticationCommands.get("in");
+                    String duration = authenticationCommands.get("duration");
+
+                    if (description != null && value != null && in != null && duration != null) {
+                        this.authenticationInfoMap.put(description, new AuthenticationInfo(description,
+                                new ParameterName(parameterName), value, ParameterLocation.getLocationFromString(in),
+                                Long.parseLong(duration)));
+                    } else {
+                        // Fallback: If strict structure is not met, maybe it's command based?
+                        // But current codebase seems to support only this single-auth structure or command-map structure
+                        // The original code was assuming the single structure.
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
         if (apiConfigMap.get("resetCommand") != null) {
             setResetCommand(apiConfigMap.get("resetCommand").toString());

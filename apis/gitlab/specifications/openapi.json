@@ -2929,6 +2929,16 @@
                   },
                   "scopes": {
                     "type": "string",
+                    "example": [
+                      "api",
+                      "read_user",
+                      "read_api",
+                      "read_repository",
+                      "write_repository",
+                      "openid",
+                      "profile",
+                      "email"
+                    ],
                     "description": "Scopes of the application. You can specify multiple scopes by separating\\\n                                 each scope using a space"
                   },
                   "confidential": {

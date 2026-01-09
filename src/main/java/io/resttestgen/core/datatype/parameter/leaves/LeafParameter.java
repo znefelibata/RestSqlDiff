@@ -185,7 +185,7 @@ public abstract class LeafParameter extends Parameter {
                 this.value = providerResult.getSecond();
                 this.valueSource = providerResult.getFirst();
             } else {
-                logger.warn("Setting value '" + value + "' to parameter '" + this.getName() + "' is not possible due to type" +
+                logger.warn("Setting value '" + providerResult.getSecond() + "' to parameter '" + this.getName() + "' is not possible due to type" +
                         " mismatch. Consider changing the type of this parameter before setting this value again.");
             }
         } catch (ValueNotAvailableException e) {

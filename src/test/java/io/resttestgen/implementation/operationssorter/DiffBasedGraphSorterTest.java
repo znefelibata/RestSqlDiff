@@ -20,6 +20,7 @@ import io.resttestgen.core.testing.TestSequence;
 import io.resttestgen.core.testing.operationsorter.OperationsSorter;
 import io.resttestgen.implementation.fuzzer.ErrorFuzzer;
 import io.resttestgen.implementation.fuzzer.NominalFuzzer;
+import io.resttestgen.implementation.oracle.SqlDiffOracle;
 import io.resttestgen.implementation.oracle.StatusCodeOracle;
 import io.resttestgen.implementation.sql.ConvertSequenceToTable;
 import io.resttestgen.implementation.sql.SqlInteraction;
@@ -38,6 +39,7 @@ import java.io.*;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 
@@ -51,7 +53,7 @@ public class DiffBasedGraphSorterTest {
     private ExtendedRandom random = Environment.getInstance().getRandom();
     @BeforeAll
     public static void setUp() throws CannotParseOpenApiException, IOException {
-        environment = Starter.initEnvironment(ApiUnderTest.loadApiFromFile("wordpress"));
+        environment = Starter.initEnvironment(ApiUnderTest.loadApiFromFile("gitlab"));
     }
 
     @Test
@@ -144,6 +146,7 @@ public class DiffBasedGraphSorterTest {
 
     @Test
     public void testInteractions() {
+        System.out.println("DEBUG: HELLO WORLD START");
         try {
             /**
              Array-String，是能直接通过父亲对像是不是Array来进行封装成JSON
@@ -155,29 +158,35 @@ public class DiffBasedGraphSorterTest {
              这三个地方的参数，根据自己的类型getValueAsFormattedString自己进行标准化处理
              */
             //生成测试序列
-            // todo 测试序列需要改，不能每次都从入度最小的节点开始
             ConvertSequenceToTable convertSequenceToTable = new ConvertSequenceToTable();
             convertSequenceToTable.createTableByColumns();
             //使用queue生成建表，宽表的数据范围比较小
 //                ConvertSequenceToTable convertSequenceToTable = new ConvertSequenceToTable(sorter.getQueue());
             logger.info("Starting strategy iteration ");
+
+            // Create a single directory for this test run
+            long timestamp = System.currentTimeMillis();
+            String testRunDirName = "test_run_" + timestamp;
+            Path testReportDir = Paths.get("reports", "sql-diff", testRunDirName);
+            Files.createDirectories(testReportDir);
+            logger.info("Reports will be saved to: " + testReportDir.toAbsolutePath());
+
             //对操作序列进行赋值操作
             /**
              目前建的表，如果是Array，则存为JSON格式，如果是Object，则拆开存为多个列，操作是合理的，因为不需要管远端API如何进行请求，本地服务只需要对列名进行翻译即可
              赋值之后和数据库的列是一一对应的，object每个属性都在leaves中有，array如果赋值了，那么在leaves中也有，反之没有
              */
-            // todo 1. 判断能否crud空值 2. insert和update的array需要进行特殊处理，成为json
-            // todo select里面的空值需要进行处理
-            // todo 看看如何生成arrya的多个参数，在element里面
             OperationsSorter sorter = new DiffBasedGraphSorter();
-            while (!sorter.isEmpty()) {
-                Operation operationToTest = sorter.getFirst();
-                logger.debug("Testing operation " + operationToTest);
-                NominalFuzzer nominalFuzzer = new NominalFuzzer(operationToTest);
-                //每一个操作生成20个测试用例
-                List<TestSequence> nominalSequences = nominalFuzzer.generateTestSequences(1);
+            System.out.println("DEBUG: SORTER CREATED");
 
-                for (TestSequence testSequence : nominalSequences) {
+            while(!sorter.isEmpty()) {
+                 Operation operationToTest = sorter.getFirst();
+                 logger.debug("Testing operation " + operationToTest);
+                 NominalFuzzer nominalFuzzer = new NominalFuzzer(operationToTest);
+                 //每一个操作生成20个测试用例
+                 List<TestSequence> nominalSequences = nominalFuzzer.generateTestSequences(2);
+
+                 for (TestSequence testSequence : nominalSequences) {
 //                    Collection<LeafParameter> leaves = testSequence.getFirst().getFuzzedOperation().getLeaves();
 //                    Collection<ArrayParameter> arrays = testSequence.getFirst().getFuzzedOperation().getArrays();
 //                    System.out.println("Generated Test Sequence for Operation: " +
@@ -193,22 +202,36 @@ public class DiffBasedGraphSorterTest {
 //                            System.out.println(" - Element Name: " + element.getName() + ", Type: " + element.getType());
 //                        }
 //                    }
-                    System.out.println("-------------------");
-                    SqlInteraction sqlInteraction = RestStrategyFactory.getStrategy(testSequence.getFirst().getFuzzedOperation().getMethod())
-                            .operationToSQL(testSequence.getFirst().getFuzzedOperation(), convertSequenceToTable);
-//                    TestRunner testRunner = TestRunner.getInstance();
-//                    testRunner.run(testSequence);
+
+                    try {
+                        SqlInteraction sqlInteraction = RestStrategyFactory.getStrategy(testSequence.getFirst().getFuzzedOperation().getMethod())
+                                .operationToSQL(testSequence.getFirst().getFuzzedOperation(), convertSequenceToTable);
+
+                        // Attach SqlInteraction to the TestInteraction for the Oracle to use
+                        testSequence.getFirst().addTag(SqlDiffOracle.SQL_INTERACTION_TAG, sqlInteraction);
+
+                        // Also add tag to ALL interactions in the sequence just in case
+                        for (TestInteraction ti : testSequence) {
+                            ti.addTag(SqlDiffOracle.SQL_INTERACTION_TAG, sqlInteraction);
+                        }
+
+                        TestRunner testRunner = TestRunner.getInstance();
+                        testRunner.run(testSequence);
+                        SqlDiffOracle sqlDiffOracle = new SqlDiffOracle(convertSequenceToTable);
+                        sqlDiffOracle.setBaseReportDir(testReportDir);
+                        sqlDiffOracle.assertTestSequence(testSequence);
+                        System.out.println("-------------------");
+                    } catch (RuntimeException e) {
+                        logger.error("Skipping test sequence for operation " + operationToTest.getMethod() + operationToTest.getEndpoint() + ": " + e.getMessage());
+                    }
                 }
                 sorter.removeFirst();
             }
 
-        } catch (Exception e) {
-            logger.error("An error occurred during the strategy execution: " + e.getMessage());
-            e.printStackTrace();
-        } finally  {
-            //todo 执行数据库删表操作，执行当前测试序列里面所有的Delete操作;
-//            TestRunner.getInstance();
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
+        System.out.println("DEBUG: HELLO WORLD END");
     }
 
 }

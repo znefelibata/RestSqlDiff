@@ -22,6 +22,9 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.PriorityQueue;
 
@@ -52,6 +55,13 @@ public class SqlDiffStrategy extends Strategy {
                 convertSequenceToTable = new ConvertSequenceToTable(sorter.getQueue());
                 convertSequenceToTable.createTableByColumns();
                 logger.info("Starting strategy iteration " + (i + 1) + "/" + numberOfOperationSorter);
+
+                // Create a single directory for the entire strategy iteration
+                long timestamp = System.currentTimeMillis();
+                String sequenceDirName = "sequence_" + i + "_" + timestamp;
+                Path sequenceReportDir = Paths.get("reports", "sql-diff", sequenceDirName);
+                Files.createDirectories(sequenceReportDir);
+
                 //对操作序列进行赋值操作
                 while (!sorter.isEmpty()) {
                     Operation operationToTest = sorter.getFirst();
@@ -71,8 +81,8 @@ public class SqlDiffStrategy extends Strategy {
                         TestRunner testRunner = TestRunner.getInstance();
                         testRunner.run(testSequence);
                         // Evaluate sequence with oracles
-                        // todo 实现新的oracle，完成对比数据库结果的功能
-                        SqlDiffOracle sqlDiffOracle = new SqlDiffOracle();
+                        SqlDiffOracle sqlDiffOracle = new SqlDiffOracle(convertSequenceToTable);
+                        sqlDiffOracle.setBaseReportDir(sequenceReportDir); // Set the shared report directory
                         sqlDiffOracle.assertTestSequence(testSequence);
 
                         // Write report to file

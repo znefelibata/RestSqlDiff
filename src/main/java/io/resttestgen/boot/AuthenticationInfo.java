@@ -38,6 +38,7 @@ public class AuthenticationInfo {
         this.value = value;
         this.in = in;
         this.duration = duration;
+        this.lastAuthUnixTimeStamp = getCurrentUnixTimeStamp();
     }
 
     /**
@@ -111,8 +112,16 @@ public class AuthenticationInfo {
      * @return true if the system is currently authenticated.
      */
     public boolean isAuthenticated() {
-        return parameterName != null && value != null && in != null && duration != null &&
+        boolean isAuth = parameterName != null && value != null && in != null && duration != null &&
                 getCurrentUnixTimeStamp() < lastAuthUnixTimeStamp + duration;
+        if (!isAuth) {
+            if (parameterName == null) logger.debug("Authentication failed: parameterName is null");
+            if (value == null) logger.debug("Authentication failed: value is null");
+            if (in == null) logger.debug("Authentication failed: in is null");
+            if (duration == null) logger.debug("Authentication failed: duration is null");
+            if (duration != null && getCurrentUnixTimeStamp() >= lastAuthUnixTimeStamp + duration) logger.debug("Authentication failed: token expired");
+        }
+        return isAuth;
     }
 
     /**
