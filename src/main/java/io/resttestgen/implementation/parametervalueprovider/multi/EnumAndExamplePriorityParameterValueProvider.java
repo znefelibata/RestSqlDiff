@@ -2,6 +2,9 @@ package io.resttestgen.implementation.parametervalueprovider.multi;
 
 import io.resttestgen.core.Environment;
 import io.resttestgen.core.datatype.parameter.leaves.LeafParameter;
+import io.resttestgen.core.datatype.parameter.leaves.NumberParameter;
+import io.resttestgen.core.datatype.parameter.leaves.BooleanParameter;
+import io.resttestgen.core.datatype.parameter.leaves.StringParameter;
 import io.resttestgen.core.helper.ExtendedRandom;
 import io.resttestgen.core.testing.parametervalueprovider.CountableParameterValueProvider;
 import io.resttestgen.core.testing.parametervalueprovider.ParameterValueProvider;
@@ -11,56 +14,150 @@ import io.resttestgen.implementation.parametervalueprovider.ParameterValueProvid
 import io.resttestgen.implementation.parametervalueprovider.single.*;
 import kotlin.Pair;
 
-import java.util.HashSet;
-import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.List;
 
+/**
+ * Parameter value provider with weighted probability distribution:
+ * - 60% probability for enum/example values (if available)
+ * - For remaining 40%, use weighted selection among:
+ *   - Boundary value (high priority for primitive types)
+ *   - Response dictionary (high priority if available)
+ *   - Last response dictionary (high priority if available)
+ *   - Random/NarrowRandom (lower priority)
+ *   - Default (lower priority)
+ */
 public class EnumAndExamplePriorityParameterValueProvider extends ParameterValueProvider {
 
     final ExtendedRandom random = Environment.getInstance().getRandom();
 
+    // Probability configuration (percentage)
+    private static final int ENUM_EXAMPLE_PROBABILITY = 60;  // 60% for enum/example
+    private static final int BOUNDARY_WEIGHT = 50;           // High weight for boundary values
+    private static final int RESPONSE_DICT_WEIGHT = 40;      // High weight for response dictionary
+    private static final int LAST_RESPONSE_DICT_WEIGHT = 20; // High weight for last response dictionary
+    private static final int RANDOM_WEIGHT = 10;             // Lower weight for random
+    private static final int NARROW_RANDOM_WEIGHT = 10;      // Lower weight for narrow random
+    private static final int DEFAULT_WEIGHT = 5;             // Lowest weight for default
+
     @Override
     public Pair<ParameterValueProvider, Object> provideValueFor(LeafParameter leafParameter) throws ValueNotAvailableException {
 
-        // If the leaf is an enum, return a random enum value
-        EnumParameterValueProvider enumParameterValueProvider = (EnumParameterValueProvider) ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.ENUM);
-        enumParameterValueProvider.setStrict(this.strict);
-        ExamplesParameterValueProvider examplesParameterValueProvider = (ExamplesParameterValueProvider) ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.EXAMPLES);
-        examplesParameterValueProvider.setStrict(this.strict);
+        // Step 1: Try enum/example values with 60% probability
+        EnumParameterValueProvider enumProvider = (EnumParameterValueProvider)
+                ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.ENUM);
+        enumProvider.setStrict(this.strict);
 
-        int numEnums = enumParameterValueProvider.countAvailableValuesFor(leafParameter);
-        int numExamples = examplesParameterValueProvider.countAvailableValuesFor(leafParameter);
+        ExamplesParameterValueProvider examplesProvider = (ExamplesParameterValueProvider)
+                ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.EXAMPLES);
+        examplesProvider.setStrict(this.strict);
 
-        if (numEnums + numExamples > 0 && random.nextInt(1, 10) <= 8) {
+        int numEnums = enumProvider.countAvailableValuesFor(leafParameter);
+        int numExamples = examplesProvider.countAvailableValuesFor(leafParameter);
+
+        // 60% probability to use enum/example if available
+        if (numEnums + numExamples > 0 && random.nextInt(100) < ENUM_EXAMPLE_PROBABILITY) {
             if (random.nextInt(numEnums + numExamples) < numEnums) {
-                return enumParameterValueProvider.provideValueFor(leafParameter);
+                return enumProvider.provideValueFor(leafParameter);
             } else {
-                return examplesParameterValueProvider.provideValueFor(leafParameter);
+                return examplesProvider.provideValueFor(leafParameter);
             }
         }
 
-        ExtendedRandom random = Environment.getInstance().getRandom();
+        // Step 2: Use weighted selection for other strategies
+        return selectFromWeightedProviders(leafParameter);
+    }
 
-        Set<ParameterValueProvider> providers = new HashSet<>();
+    /**
+     * Selects a provider using weighted probability distribution.
+     * Higher weights mean higher probability of being selected.
+     */
+    private Pair<ParameterValueProvider, Object> selectFromWeightedProviders(LeafParameter leafParameter)
+            throws ValueNotAvailableException {
 
-        // Random providers are always available
-        providers.add(ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.RANDOM));
-        providers.add(ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.NARROW_RANDOM));
+        List<WeightedProvider> weightedProviders = new ArrayList<>();
 
-        // List of candidate providers, that will be used only if they have values available
-        Set<CountableParameterValueProvider> candidateProviders = new HashSet<>();
-        candidateProviders.add((DefaultParameterValueProvider) ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.DEFAULT));
-        ResponseDictionaryParameterValueProvider responseDictionaryParameterValueProvider = (ResponseDictionaryParameterValueProvider) ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.RESPONSE_DICTIONARY);
-        candidateProviders.add(responseDictionaryParameterValueProvider);
-        LastResponseDictionaryParameterValueProvider lastResponseDictionaryParameterValueProvider = (LastResponseDictionaryParameterValueProvider) ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.LAST_RESPONSE_DICTIONARY);
-        candidateProviders.add(lastResponseDictionaryParameterValueProvider);
+        // Boundary value provider - high priority for primitive types
+        if (isPrimitiveType(leafParameter)) {
+            ParameterValueProvider boundaryProvider =
+                    ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.BOUNDARY_VALUE);
+            weightedProviders.add(new WeightedProvider(boundaryProvider, BOUNDARY_WEIGHT));
+        }
 
-        candidateProviders.forEach(p -> p.setStrict(this.strict));
+        // Response dictionary - high priority if has values
+        ResponseDictionaryParameterValueProvider responseProvider = (ResponseDictionaryParameterValueProvider)
+                ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.RESPONSE_DICTIONARY);
+        responseProvider.setStrict(this.strict);
+        if (responseProvider.countAvailableValuesFor(leafParameter) > 0) {
+            weightedProviders.add(new WeightedProvider(responseProvider, RESPONSE_DICT_WEIGHT));
+        }
 
-        providers.addAll(candidateProviders.stream().filter(p -> p.countAvailableValuesFor(leafParameter) > 0)
-                .collect(Collectors.toSet()));
+        // Last response dictionary - high priority if has values
+        LastResponseDictionaryParameterValueProvider lastResponseProvider = (LastResponseDictionaryParameterValueProvider)
+                ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.LAST_RESPONSE_DICTIONARY);
+        lastResponseProvider.setStrict(this.strict);
+        if (lastResponseProvider.countAvailableValuesFor(leafParameter) > 0) {
+            weightedProviders.add(new WeightedProvider(lastResponseProvider, LAST_RESPONSE_DICT_WEIGHT));
+        }
 
-        ParameterValueProvider chosenProvider = random.nextElement(providers).get();
-        return chosenProvider.provideValueFor(leafParameter);
+        // Random provider - always available, lower priority
+        ParameterValueProvider randomProvider =
+                ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.RANDOM);
+        weightedProviders.add(new WeightedProvider(randomProvider, RANDOM_WEIGHT));
+
+        // Narrow random provider - always available, lower priority
+        ParameterValueProvider narrowRandomProvider =
+                ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.NARROW_RANDOM);
+        weightedProviders.add(new WeightedProvider(narrowRandomProvider, NARROW_RANDOM_WEIGHT));
+
+        // Default provider - lowest priority if has values
+        DefaultParameterValueProvider defaultProvider = (DefaultParameterValueProvider)
+                ParameterValueProviderCachedFactory.getParameterValueProvider(ParameterValueProviderType.DEFAULT);
+        defaultProvider.setStrict(this.strict);
+        if (defaultProvider.countAvailableValuesFor(leafParameter) > 0) {
+            weightedProviders.add(new WeightedProvider(defaultProvider, DEFAULT_WEIGHT));
+        }
+
+        // Calculate total weight and select based on weighted probability
+        int totalWeight = weightedProviders.stream().mapToInt(wp -> wp.weight).sum();
+        int randomValue = random.nextInt(totalWeight);
+
+        int cumulativeWeight = 0;
+        for (WeightedProvider wp : weightedProviders) {
+            cumulativeWeight += wp.weight;
+            if (randomValue < cumulativeWeight) {
+                return wp.provider.provideValueFor(leafParameter);
+            }
+        }
+
+        // Fallback to random (should not reach here)
+        return randomProvider.provideValueFor(leafParameter);
+    }
+
+    /**
+     * Checks if the parameter is a primitive type that benefits from boundary testing.
+     */
+    private boolean isPrimitiveType(LeafParameter leafParameter) {
+        if (leafParameter instanceof NumberParameter || leafParameter instanceof BooleanParameter) {
+            return true;
+        }
+        if (leafParameter instanceof StringParameter) {
+            StringParameter sp = (StringParameter) leafParameter;
+            return sp.getMinLength() != null || sp.getMaxLength() != null;
+        }
+        return false;
+    }
+
+    /**
+     * Helper class to hold provider with its weight.
+     */
+    private static class WeightedProvider {
+        final ParameterValueProvider provider;
+        final int weight;
+
+        WeightedProvider(ParameterValueProvider provider, int weight) {
+            this.provider = provider;
+            this.weight = weight;
+        }
     }
 }

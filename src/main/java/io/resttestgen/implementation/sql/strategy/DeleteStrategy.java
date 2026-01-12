@@ -48,8 +48,11 @@ public class DeleteStrategy extends RestStrategy {
         }
         String whereClauseString = SqlGenerationHelper.generateWhereClauseAndCleanParams(whereValues, op, convertSequenceToTable);
         if (whereClauseString.isEmpty()) {
-            log.warn("DELETE operation skipped: No parameters found (Dangerous full table delete) for {}", op.getEndpoint());
-            throw new RuntimeException("Dangerous Operation: DELETE without WHERE/LIMIT clause is not allowed for " + op.getEndpoint());
+            log.warn("DELETE operation skipped: No where parameters found (Dangerous full table delete) for {}", op.getEndpoint());
+            SqlInteraction failedInteraction = new SqlInteraction();
+            failedInteraction.setStatus(SqlInteraction.InteractionStatus.FAILED);
+            failedInteraction.setErrorMessage("Dangerous Operation: DELETE without WHERE/LIMIT clause.");
+            return failedInteraction;
         }
         StringBuilder deleteTableSQL = new StringBuilder("DELETE FROM " + convertSequenceToTable.getTableName());
         deleteTableSQL.append(whereClauseString);

@@ -49,7 +49,7 @@ public class GetStrategy extends RestStrategy {
         String whereClauseString = SqlGenerationHelper.generateWhereClauseAndCleanParams(whereValues, op, convertSequenceToTable);
         //查询全表是合法的
         if (whereClauseString.isEmpty()) {
-            log.warn("SELECT operation skipped: No parameters found (Dangerous full table delete) for {}", op.getEndpoint());
+            log.warn("SELECT operation : 进行全表查询 No parameters found (Dangerous full table SELECT) for {}", op.getEndpoint());
         }
         StringBuilder selectTableSQL = new StringBuilder("SELECT * FROM " + convertSequenceToTable.getTableName());
         selectTableSQL.append(whereClauseString);

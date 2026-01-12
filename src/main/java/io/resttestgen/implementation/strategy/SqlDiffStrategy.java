@@ -42,24 +42,24 @@ public class SqlDiffStrategy extends Strategy {
         // According to the order provided by the graph, execute the nominal fuzzer
         //搜集当前API规范文件里面的所有信息，进行数据库建表操作
         //用一个list来存储当前建好的表里面的所有的列名
-//        ConvertSequenceToTable convertSequenceToTable = new ConvertSequenceToTable(); // Removed unused variable
-//        convertSequenceToTable.createTableByColumns();
+        ConvertSequenceToTable convertSequenceToTable = new ConvertSequenceToTable(); // Removed unused variable
+        convertSequenceToTable.createTableByColumns();
+        String executionDateTime = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"));
         //循环选取numberOfOperationSorter条不同的测试序列，每次从postQueue中随机选择一个节点作为起始节点，从ODG中dfs选择测试序列，
         int i = 0;
         while (i < numberOfOperationSorter) {
-            ConvertSequenceToTable convertSequenceToTable = null;
             try {
                 //生成测试序列
                 OperationsSorter sorter = new DiffBasedGraphSorter();
                 //使用queue生成建表，宽表的数据范围比较小
-                convertSequenceToTable = new ConvertSequenceToTable(sorter.getQueue());
-                convertSequenceToTable.createTableByColumns();
+//                ConvertSequenceToTable convertSequenceToTable = new ConvertSequenceToTable(sorter.getQueue());
+//                convertSequenceToTable.createTableByColumns();
                 logger.info("Starting strategy iteration " + (i + 1) + "/" + numberOfOperationSorter);
 
                 // Create a single directory for the entire strategy iteration
                 long timestamp = System.currentTimeMillis();
                 String sequenceDirName = "sequence_" + i + "_" + timestamp;
-                Path sequenceReportDir = Paths.get("reports", "sql-diff", sequenceDirName);
+                Path sequenceReportDir = Paths.get("reports", "sql-diff", executionDateTime, sequenceDirName);
                 Files.createDirectories(sequenceReportDir);
 
                 //对操作序列进行赋值操作
@@ -68,7 +68,7 @@ public class SqlDiffStrategy extends Strategy {
                     logger.debug("Testing operation " + operationToTest);
                     NominalFuzzer nominalFuzzer = new NominalFuzzer(operationToTest);
                     //每一个操作生成20个测试用例
-                    List<TestSequence> nominalSequences = nominalFuzzer.generateTestSequences(20);
+                    List<TestSequence> nominalSequences = nominalFuzzer.generateTestSequences(10);
 
                     for (TestSequence testSequence : nominalSequences) {
                          SqlInteraction sqlInteraction = RestStrategyFactory.getStrategy(testSequence.getFirst().getFuzzedOperation().getMethod())
@@ -121,6 +121,7 @@ public class SqlDiffStrategy extends Strategy {
 //                if (convertSequenceToTable != null) {
 //                    convertSequenceToTable.dropTable();
 //                }
+                logger.info("End strategy iteration " + (i + 1) + "/" + numberOfOperationSorter);
                 TestRunner.getInstance();
                 i++;
             }

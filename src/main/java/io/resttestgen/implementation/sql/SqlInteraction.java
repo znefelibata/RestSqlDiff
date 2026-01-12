@@ -57,7 +57,7 @@ public class SqlInteraction {
      * 如果操作失败，这里可以存储捕获到的原始 SQLException。
      * 这对于深度调试和日志记录非常有用。
      */
-    private SQLException exception;
+    private transient SQLException exception;
 
     // --- 3. 结果数据 (Data) ---
 

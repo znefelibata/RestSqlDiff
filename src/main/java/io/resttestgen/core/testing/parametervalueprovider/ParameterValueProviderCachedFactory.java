@@ -53,6 +53,12 @@ public class ParameterValueProviderCachedFactory {
                 case ENUM_AND_EXAMPLE_PRIORITY:
                     provider = new EnumAndExamplePriorityParameterValueProvider();
                     break;
+                case BOUNDARY_VALUE:
+                    provider = new BoundaryValueParameterValueProvider();
+                    break;
+                case BOUNDARY_VALUE_PRIORITY:
+                    provider = new BoundaryValuePriorityParameterValueProvider();
+                    break;
                 default:
                     provider = new RandomParameterValueProvider();
             }

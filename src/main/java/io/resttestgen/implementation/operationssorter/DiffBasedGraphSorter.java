@@ -38,7 +38,7 @@ public class DiffBasedGraphSorter extends StaticOperationsSorter {
     
     // 前置依赖链配置
     private static final int MIN_PREREQUISITE_CHAIN = 1;  // 最小前置链长度
-    private static final int MAX_PREREQUISITE_CHAIN = 5;  // 最大前置链长度（避免过长的依赖链）
+    private static final int MAX_PREREQUISITE_CHAIN = 8;  // 最大前置链长度（避免过长的依赖链）
     
     // DELETE 操作策略枚举
     public enum DeleteStrategy {
@@ -49,7 +49,7 @@ public class DiffBasedGraphSorter extends StaticOperationsSorter {
     
     // DELETE 配置
     private static final int MIN_DELETE_COUNT = 1;      // 最少 DELETE 数量
-    private static final int MAX_DELETE_COUNT = 5;      // 最多 DELETE 数量
+    private static final int MAX_DELETE_COUNT = 3;      // 最多 DELETE 数量
     private DeleteStrategy currentDeleteStrategy;       // 当前使用的 DELETE 策略
 
     //用来记录所有的post节点

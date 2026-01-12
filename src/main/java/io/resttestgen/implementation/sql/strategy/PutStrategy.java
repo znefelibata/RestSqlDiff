@@ -90,16 +90,14 @@ public class PutStrategy extends RestStrategy {
             // 移除所有 value 为 null 的键值对
             whereValues.entrySet().removeIf(entry -> entry.getValue() == null);
         }
-        if (whereValues.isEmpty()) {
-            log.warn("UPDATE operation skipped: No conditions specified (WHERE clause empty) for {}", op.getEndpoint());
-            return new SqlInteraction(SqlInteraction.OperationType.UPDATE, "",
-                    "UPDATE operation skipped: No conditions specified (WHERE clause empty)",
-                    new SQLException("Dangerous Operation: UPDATE without WHERE clause is not allowed for " + op.getEndpoint())); // 或者抛异常
-        }
         String whereClauseString = SqlGenerationHelper.generateWhereClauseAndCleanParams(whereValues, op, convertSequenceToTable);
         if (whereClauseString.isEmpty()) {
             // 极其危险，防止更新全表。除非你确实允许全表更新，否则抛出异常。
-            throw new RuntimeException("Dangerous Operation: UPDATE without WHERE clause is not allowed for " + op.getEndpoint());
+            log.warn("UPDATE operation skipped: No where parameters found (Dangerous full table update) for {}", op.getEndpoint());
+            SqlInteraction failedInteraction = new SqlInteraction();
+            failedInteraction.setStatus(SqlInteraction.InteractionStatus.FAILED);
+            failedInteraction.setErrorMessage("Dangerous Operation: UPDATE without WHERE clause is not allowed.");
+            return failedInteraction;
         }
         StringBuilder updateTableSQL = new StringBuilder("UPDATE "  + convertSequenceToTable.getTableName() + " SET ");
         for (String key : setValues.keySet()) {

@@ -12,6 +12,7 @@ public enum ParameterValueProviderType {
     // SINGLE
     RANDOM,
     NARROW_RANDOM,
+    BOUNDARY_VALUE,  // Boundary value analysis testing strategy
     ENUM,
     EXAMPLES,
     DEFAULT,
@@ -25,13 +26,16 @@ public enum ParameterValueProviderType {
     GLOBAL_DICTIONARY_PRIORITY,
     LOCAL_DICTIONARY_PRIORITY,
     KEEP_LAST_ID,
-    ENUM_AND_EXAMPLE_PRIORITY;
+    ENUM_AND_EXAMPLE_PRIORITY,
+    BOUNDARY_VALUE_PRIORITY;  // Combined boundary value with other strategies
 
     public static ParameterValueProviderType getTypeFromProvider(ParameterValueProvider provider) {
         if (provider instanceof RandomParameterValueProvider) {
             return RANDOM;
         } else if (provider instanceof NarrowRandomParameterValueProvider) {
             return NARROW_RANDOM;
+        } else if (provider instanceof BoundaryValueParameterValueProvider) {
+            return BOUNDARY_VALUE;
         } else if (provider instanceof EnumParameterValueProvider) {
             return ENUM;
         } else if (provider instanceof ExamplesParameterValueProvider) {
@@ -54,6 +58,8 @@ public enum ParameterValueProviderType {
             return LOCAL_DICTIONARY_PRIORITY;
         } else if (provider instanceof KeepLastIdParameterValueProvider) {
             return KEEP_LAST_ID;
+        } else if (provider instanceof BoundaryValuePriorityParameterValueProvider) {
+            return BOUNDARY_VALUE_PRIORITY;
         } else {
             return ENUM_AND_EXAMPLE_PRIORITY;
         }

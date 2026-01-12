@@ -6,6 +6,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 import io.resttestgen.core.datatype.HttpStatusCode;
+import io.resttestgen.core.datatype.parameter.Parameter;
+import io.resttestgen.core.datatype.parameter.structured.StructuredParameter;
 import io.resttestgen.core.testing.Oracle;
 import io.resttestgen.core.testing.TestInteraction;
 import io.resttestgen.core.testing.TestResult;
@@ -21,7 +23,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 
 /**
@@ -175,6 +179,10 @@ public class SqlDiffOracle extends Oracle {
             singleReport.put("responseHeaders", testInteraction.getResponseHeaders().toString());
             // Store Request Body
             singleReport.put("requestBody", testInteraction.getRequestBody());
+
+            // Extract and store all API parameters (path, query, request body)
+            Map<String, Object> apiParameters = extractApiParameters(testInteraction.getFuzzedOperation());
+            singleReport.put("apiParameters", apiParameters);
 
             List<Map<String, Object>> queryResults = sqlInteraction.getQueryResults();
             String responseBody = testInteraction.getResponseBody();
@@ -622,6 +630,87 @@ public class SqlDiffOracle extends Oracle {
         return null;
     }
 
+    /**
+     * Extract all API parameters (path, query, request body) from the fuzzed operation.
+     * Returns a map with three keys: "pathParameters", "queryParameters", "requestBodyParameters".
+     * Each key maps to a list of maps containing parameter name and value.
+     */
+    private Map<String, Object> extractApiParameters(io.resttestgen.core.openapi.Operation operation) {
+        Map<String, Object> allParams = new LinkedHashMap<>();
+
+        // 1. Path Parameters
+        List<Map<String, Object>> pathParams = new ArrayList<>();
+        if (operation.getPathParameters() != null) {
+            for (Parameter p : operation.getPathParameters()) {
+                Map<String, Object> paramInfo = new LinkedHashMap<>();
+                paramInfo.put("name", p.getName().toString());
+                paramInfo.put("value", p.getValueAsFormattedString());
+                paramInfo.put("type", p.getType() != null ? p.getType().toString() : "unknown");
+                pathParams.add(paramInfo);
+            }
+        }
+        allParams.put("pathParameters", pathParams);
+
+        // 2. Query Parameters
+        List<Map<String, Object>> queryParams = new ArrayList<>();
+        if (operation.getQueryParameters() != null) {
+            for (Parameter p : operation.getQueryParameters()) {
+                Map<String, Object> paramInfo = new LinkedHashMap<>();
+                paramInfo.put("name", p.getName().toString());
+                paramInfo.put("value", p.getValueAsFormattedString());
+                paramInfo.put("type", p.getType() != null ? p.getType().toString() : "unknown");
+                queryParams.add(paramInfo);
+            }
+        }
+        allParams.put("queryParameters", queryParams);
+
+        // 3. Request Body Parameters (flatten structured parameters)
+        List<Map<String, Object>> bodyParams = new ArrayList<>();
+        StructuredParameter requestBody = operation.getRequestBody();
+        if (requestBody != null) {
+            extractParametersRecursive(requestBody, "", bodyParams);
+        }
+        allParams.put("requestBodyParameters", bodyParams);
+
+        return allParams;
+    }
+
+    /**
+     * Recursively extract parameters from a structured parameter (ObjectParameter or ArrayParameter).
+     * Adds each leaf parameter with its full path.
+     */
+    private void extractParametersRecursive(Parameter param, String parentPath, List<Map<String, Object>> result) {
+        String currentPath = parentPath.isEmpty() ? param.getName().toString() : parentPath + "." + param.getName().toString();
+
+        if (param instanceof StructuredParameter) {
+            // Recursively process children
+            StructuredParameter structured = (StructuredParameter) param;
+            for (Parameter child : structured.getChildren()) {
+                extractParametersRecursive(child, currentPath, result);
+            }
+        } else {
+            // Leaf parameter
+            Map<String, Object> paramInfo = new LinkedHashMap<>();
+            paramInfo.put("path", currentPath);
+            paramInfo.put("name", param.getName().toString());
+            paramInfo.put("value", param.getValueAsFormattedString());
+            paramInfo.put("type", param.getType() != null ? param.getType().toString() : "unknown");
+            result.add(paramInfo);
+        }
+    }
+
+    /**
+     * Extract SQL column names and values from query results.
+     * Returns a list of maps, each containing column name -> value pairs for each row.
+     */
+    private List<Map<String, Object>> extractSqlColumnsAndValues(List<Map<String, Object>> queryResults) {
+        if (queryResults == null || queryResults.isEmpty()) {
+            return new ArrayList<>();
+        }
+        // Return all rows with their column names and values
+        return queryResults;
+    }
+
     private void writeReportToFile(TestSequence testSequence, List<Map<String, Object>> interactionReports) throws IOException {
         // Use baseReportDir if set, otherwise fallback to "reports/sql-diff/report_current_time"
         Path reportsDir;
@@ -634,6 +723,10 @@ public class SqlDiffOracle extends Oracle {
         }
         Files.createDirectories(reportsDir);
 
+        // DateTimeFormatter for human-readable timestamps in folder names
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS");
+
+        int sequenceIndex = 0; // Index to ensure time-based ordering
         for (Map<String, Object> report : interactionReports) {
             String opId = (String) report.get("operation");
             if (opId == null) opId = "unknown";
@@ -645,14 +738,15 @@ public class SqlDiffOracle extends Oracle {
             Object sqlStatusObj = report.get("sqlStatus");
             String sqlStatusStr = sqlStatusObj != null ? sqlStatusObj.toString() : "NULL";
 
-            // Also use operation description for more readable folder name
-            // but sanitize it for file system characters
-            String timestamp = String.valueOf(System.nanoTime()); // Higher precision for files
+            // Generate readable timestamp for this operation
+            String formattedTimestamp = LocalDateTime.now().format(dtf);
 
-            // Format: op_{opId}_API_{statusCode}_SQL_{status}_{timestamp}
-            String opFolderName = "op_" + opId + "_API_" + apiStatusStr + "_SQL_" + sqlStatusStr + "_" + timestamp;
+            // Format: {sequenceIndex}_{timestamp}_op_{opId}_API_{statusCode}_SQL_{status}
+            // The sequenceIndex ensures lexicographic ordering matches execution order
+            String opFolderName = String.format("%03d_%s_op_%s_API_%s_SQL_%s",
+                    sequenceIndex, formattedTimestamp, opId, apiStatusStr, sqlStatusStr);
 
-            // Optional: You might want to sanitize opId just in case, though usually safe.
+            // Sanitize for file system characters
             opFolderName = opFolderName.replaceAll("[^a-zA-Z0-9._-]", "_");
 
             Path opDir = reportsDir.resolve(opFolderName);
@@ -660,12 +754,16 @@ public class SqlDiffOracle extends Oracle {
             Path logsDir = opDir.resolve("logs");
             Files.createDirectories(logsDir);
 
+            sequenceIndex++;
+
             // 1. Write API Response (single object list for API JSON format)
             List<Map<String, Object>> apiResults = new ArrayList<>();
             Map<String, Object> apiData = new LinkedHashMap<>();
             apiData.put("method", report.get("method"));
             apiData.put("endpoint", report.get("endpoint"));
             apiData.put("status", report.get("apiStatus"));
+            // Add all API parameters (path, query, request body)
+            apiData.put("apiParameters", report.get("apiParameters"));
             apiData.put("responseBody", report.get("apiResponseBody"));
             // Add request header/body if available in source report
             apiData.put("requestHeaders", report.get("requestHeaders"));
@@ -682,6 +780,32 @@ public class SqlDiffOracle extends Oracle {
             sqlData.put("endpoint", report.get("endpoint"));
             sqlData.put("status", report.get("sqlStatus"));
             sqlData.put("executedSql", report.get("executedSql"));
+            // Add detailed SQL column names and values
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> queryResults = (List<Map<String, Object>>) report.get("sqlQueryResults");
+            if (queryResults != null && !queryResults.isEmpty()) {
+                // Extract column names from first row
+                Set<String> columnNames = queryResults.get(0).keySet();
+                sqlData.put("columnNames", new ArrayList<>(columnNames));
+                // Add detailed rows with column name -> value pairs
+                List<Map<String, Object>> detailedRows = new ArrayList<>();
+                for (int rowIndex = 0; rowIndex < queryResults.size(); rowIndex++) {
+                    Map<String, Object> row = queryResults.get(rowIndex);
+                    Map<String, Object> detailedRow = new LinkedHashMap<>();
+                    detailedRow.put("rowIndex", rowIndex);
+                    List<Map<String, Object>> columns = new ArrayList<>();
+                    for (Map.Entry<String, Object> col : row.entrySet()) {
+                        Map<String, Object> colDetail = new LinkedHashMap<>();
+                        colDetail.put("columnName", col.getKey());
+                        colDetail.put("value", col.getValue());
+                        colDetail.put("valueType", col.getValue() != null ? col.getValue().getClass().getSimpleName() : "null");
+                        columns.add(colDetail);
+                    }
+                    detailedRow.put("columns", columns);
+                    detailedRows.add(detailedRow);
+                }
+                sqlData.put("detailedRows", detailedRows);
+            }
             sqlData.put("queryResults", report.get("sqlQueryResults"));
             if (report.get("sqlErrorMessage") != null) {
                 sqlData.put("error", report.get("sqlErrorMessage"));
@@ -699,6 +823,8 @@ public class SqlDiffOracle extends Oracle {
             diffData.put("apiStatus", report.get("apiStatus"));
             diffData.put("sqlStatus", report.get("sqlStatus"));
             diffData.put("operation", report.get("operation"));
+            // Add API parameters to diff report for reference
+            diffData.put("apiParameters", report.get("apiParameters"));
             diffData.put("diffStatus", report.get("diffStatus"));
             diffData.put("diffMessage", report.get("diffMessage"));
             diffData.put("checks", report.get("comparisons"));
@@ -716,6 +842,57 @@ public class SqlDiffOracle extends Oracle {
             logContent.append("--- API Operation ---\n");
             logContent.append("Endpoint: ").append(report.get("endpoint")).append("\n");
             logContent.append("Method: ").append(report.get("method")).append("\n\n");
+
+            // Add API Parameters section
+            logContent.append("--- API Parameters ---\n");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> apiParams = (Map<String, Object>) report.get("apiParameters");
+            if (apiParams != null) {
+                // Path Parameters
+                logContent.append("Path Parameters:\n");
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> pathParams = (List<Map<String, Object>>) apiParams.get("pathParameters");
+                if (pathParams != null && !pathParams.isEmpty()) {
+                    for (Map<String, Object> param : pathParams) {
+                        logContent.append("  - ").append(param.get("name"))
+                                .append(" = ").append(param.get("value"))
+                                .append(" (type: ").append(param.get("type")).append(")\n");
+                    }
+                } else {
+                    logContent.append("  <none>\n");
+                }
+
+                // Query Parameters
+                logContent.append("Query Parameters:\n");
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> queryParams = (List<Map<String, Object>>) apiParams.get("queryParameters");
+                if (queryParams != null && !queryParams.isEmpty()) {
+                    for (Map<String, Object> param : queryParams) {
+                        logContent.append("  - ").append(param.get("name"))
+                                .append(" = ").append(param.get("value"))
+                                .append(" (type: ").append(param.get("type")).append(")\n");
+                    }
+                } else {
+                    logContent.append("  <none>\n");
+                }
+
+                // Request Body Parameters
+                logContent.append("Request Body Parameters:\n");
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> bodyParams = (List<Map<String, Object>>) apiParams.get("requestBodyParameters");
+                if (bodyParams != null && !bodyParams.isEmpty()) {
+                    for (Map<String, Object> param : bodyParams) {
+                        logContent.append("  - ").append(param.get("path"))
+                                .append(" = ").append(param.get("value"))
+                                .append(" (type: ").append(param.get("type")).append(")\n");
+                    }
+                } else {
+                    logContent.append("  <none>\n");
+                }
+            } else {
+                logContent.append("  <no parameters extracted>\n");
+            }
+            logContent.append("\n");
 
             logContent.append("--- API Request ---\n");
             logContent.append("Headers: ").append(report.get("requestHeaders")).append("\n");
@@ -743,7 +920,30 @@ public class SqlDiffOracle extends Oracle {
                 logContent.append("Error Message: ").append(sqlErr).append("\n");
             }
             logContent.append("Executed SQL:\n").append(report.get("executedSql")).append("\n");
-            logContent.append("Query Results:\n").append(gson.toJson(report.get("sqlQueryResults"))).append("\n\n");
+
+            // Add detailed SQL columns and values
+            logContent.append("SQL Query Results (Column Details):\n");
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> sqlQueryResults = (List<Map<String, Object>>) report.get("sqlQueryResults");
+            if (sqlQueryResults != null && !sqlQueryResults.isEmpty()) {
+                // Print column names
+                Set<String> colNames = sqlQueryResults.get(0).keySet();
+                logContent.append("  Columns: ").append(String.join(", ", colNames)).append("\n");
+                // Print each row
+                for (int rowIdx = 0; rowIdx < sqlQueryResults.size(); rowIdx++) {
+                    Map<String, Object> row = sqlQueryResults.get(rowIdx);
+                    logContent.append("  Row ").append(rowIdx).append(":\n");
+                    for (Map.Entry<String, Object> col : row.entrySet()) {
+                        String valueType = col.getValue() != null ? col.getValue().getClass().getSimpleName() : "null";
+                        logContent.append("    - ").append(col.getKey())
+                                .append(" = ").append(col.getValue())
+                                .append(" (").append(valueType).append(")\n");
+                    }
+                }
+            } else {
+                logContent.append("  <no results>\n");
+            }
+            logContent.append("\n");
 
             logContent.append("--- Oracle Comparison ---\n");
             logContent.append("Status: ").append(report.get("diffStatus")).append("\n");
