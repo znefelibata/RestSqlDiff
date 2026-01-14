@@ -55,12 +55,14 @@ public class DiffBasedGraphSorter extends StaticOperationsSorter {
     //用来记录所有的post节点
     private final List<OperationNode> postNodes = new ArrayList<>();
     private final List<OperationNode> deleteNodes = new ArrayList<>();
+    private final List<OperationNode> getNodes = new ArrayList<>(); // 新增：记录所有的GET节点
 
 
     public DiffBasedGraphSorter() {
-        computePostToDeleteMap();
         computeAllPost();
         computeAllDelete();
+        computeAllGet(); // 新增：计算所有GET节点
+        computePostToDeleteMap();
         getTestSequence();
     }
 
@@ -105,29 +107,137 @@ public class DiffBasedGraphSorter extends StaticOperationsSorter {
         Collections.shuffle(deleteNodes);
     }
     /**.
+     * 获得所有的get节点
+     */
+    public void computeAllGet() {
+        getNodes.addAll(graph.getGraph().vertexSet().stream()
+                .filter(n -> n.getOperation().getMethod() == HttpMethod.GET)
+                .collect(Collectors.toList()));
+        Collections.shuffle(getNodes);
+    }
+    /**.
      * 用来生成post和delete的映射关系
+     * 匹配规则：
+     * 1. POST /resources 应该匹配 DELETE /resources/{id}
+     * 2. POST /parent/{parentId}/resources 应该匹配 DELETE /parent/{parentId}/resources/{id}
+     * 核心逻辑：DELETE端点去掉最后一个路径参数后应该等于POST端点
      */
     public void computePostToDeleteMap() {
-        List<OperationNode> postNodes = graph.getGraph().vertexSet().stream()
-                .filter(n -> n.getOperation().getMethod() == HttpMethod.POST)
-                .collect(Collectors.toList());
-        List<OperationNode> deleteNodes = graph.getGraph().vertexSet().stream()
-                .filter(n -> n.getOperation().getMethod() == HttpMethod.DELETE)
-                .collect(Collectors.toList());
-//        Collections.shuffle(postNodes);
-//        Collections.shuffle(deleteNodes);
-        int size = Math.min(postNodes.size(), deleteNodes.size());
         for (OperationNode postNode : postNodes) {
             Operation postOperation = postNode.getOperation();
             String postEndpoint = postOperation.getEndpoint();
+
+            // 标准化POST端点（移除尾部斜杠）
+            String normalizedPostEndpoint = postEndpoint.endsWith("/")
+                ? postEndpoint.substring(0, postEndpoint.length() - 1)
+                : postEndpoint;
+
+            Operation bestMatch = null;
+            int bestMatchScore = -1;
+
             for (OperationNode deleteNode : deleteNodes) {
                 String deleteEndpoint = deleteNode.getOperation().getEndpoint();
                 Operation deleteOperation = deleteNode.getOperation();
-                if (postEndpoint.equals(deleteEndpoint) || deleteEndpoint.contains(postEndpoint) || postEndpoint.contains(deleteEndpoint)) {
-                    postToDeleteMap.put(postOperation, deleteOperation);
+
+                // 标准化DELETE端点（移除尾部斜杠）
+                String normalizedDeleteEndpoint = deleteEndpoint.endsWith("/")
+                    ? deleteEndpoint.substring(0, deleteEndpoint.length() - 1)
+                    : deleteEndpoint;
+
+                // 检查匹配条件
+                int matchScore = calculateEndpointMatchScore(normalizedPostEndpoint, normalizedDeleteEndpoint);
+
+                if (matchScore > bestMatchScore) {
+                    bestMatchScore = matchScore;
+                    bestMatch = deleteOperation;
+                }
+            }
+
+            if (bestMatch != null && bestMatchScore > 0) {
+                postToDeleteMap.put(postOperation, bestMatch);
+            }
+        }
+    }
+
+    /**
+     * 计算POST和DELETE端点的匹配分数
+     * 分数越高表示匹配越精确
+     *
+     * @param postEndpoint POST端点（已标准化）
+     * @param deleteEndpoint DELETE端点（已标准化）
+     * @return 匹配分数，0表示不匹配
+     */
+    private int calculateEndpointMatchScore(String postEndpoint, String deleteEndpoint) {
+        // 将端点分割成路径片段
+        String[] postSegments = postEndpoint.split("/");
+        String[] deleteSegments = deleteEndpoint.split("/");
+
+        // 场景1：DELETE端点比POST端点多一个路径参数
+        // 例如：POST /resources -> DELETE /resources/{id}
+        // 或者：POST /parent/{parentId}/resources -> DELETE /parent/{parentId}/resources/{id}
+        if (deleteSegments.length == postSegments.length + 1) {
+            // 检查最后一个DELETE片段是否是路径参数（以{开头并以}结尾）
+            String lastDeleteSegment = deleteSegments[deleteSegments.length - 1];
+            if (isPathParameter(lastDeleteSegment)) {
+                // 检查前面的片段是否都匹配（考虑路径参数）
+                boolean allMatch = true;
+                for (int i = 0; i < postSegments.length; i++) {
+                    if (!segmentsMatch(postSegments[i], deleteSegments[i])) {
+                        allMatch = false;
+                        break;
+                    }
+                }
+                if (allMatch) {
+                    // 精确匹配：DELETE = POST + /{id}
+                    return 100;
                 }
             }
         }
+
+        // 场景2：端点完全相同（某些API设计中POST和DELETE共享端点）
+        if (postEndpoint.equals(deleteEndpoint)) {
+            return 50;
+        }
+
+        // 场景3：DELETE端点是POST端点加上固定后缀（如 /resources -> /resources:delete）
+        // 这种情况较少见，给较低分数
+        if (deleteEndpoint.startsWith(postEndpoint) &&
+            (deleteEndpoint.length() > postEndpoint.length())) {
+            String suffix = deleteEndpoint.substring(postEndpoint.length());
+            // 确保后缀以/开头且只有一个路径参数
+            if (suffix.startsWith("/") && suffix.split("/").length == 2) {
+                String paramPart = suffix.substring(1);
+                if (isPathParameter(paramPart)) {
+                    return 90;
+                }
+            }
+        }
+
+        return 0; // 不匹配
+    }
+
+    /**
+     * 检查一个路径片段是否是路径参数
+     * 路径参数的格式为 {paramName}
+     */
+    private boolean isPathParameter(String segment) {
+        return segment.startsWith("{") && segment.endsWith("}");
+    }
+
+    /**
+     * 检查两个路径片段是否匹配
+     * 如果两者都是路径参数或者字面值相同，则认为匹配
+     */
+    private boolean segmentsMatch(String segment1, String segment2) {
+        // 如果字面值相同
+        if (segment1.equals(segment2)) {
+            return true;
+        }
+        // 如果两者都是路径参数
+        if (isPathParameter(segment1) && isPathParameter(segment2)) {
+            return true;
+        }
+        return false;
     }
 
     //用dfs得到测试序列
@@ -146,11 +256,11 @@ public class DiffBasedGraphSorter extends StaticOperationsSorter {
         System.out.println("DEBUG: Current DELETE strategy: " + currentDeleteStrategy);
 
         // 改进策略：
-        // 80% 的概率优先选择有出度（有后续依赖操作）的POST节点作为起始点，以生成更有意义的长序列
-        // 20% 的概率从所有POST节点中随机选择，以确保那些独立的（出度为0）POST操作也能被测试到
+        // 60% 的概率优先选择有出度（有后续依赖操作）的POST节点作为起始点，以生成更有意义的长序列
+        // 40% 的概率从所有POST节点中随机选择，以确保那些独立的（出度为0）POST操作也能被测试到
         List<OperationNode> candidateNodes;
 
-        if (random.nextDouble() < 0.8) {
+        if (random.nextDouble() < 0.6) {
             candidateNodes = postNodes.stream()
                     .filter(node -> graph.getGraph().outDegreeOf(node) > 0)
                     .collect(Collectors.toList());
