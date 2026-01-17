@@ -1,7 +1,0 @@
-name: WordPress
-authenticationCommands:
-  name: Authorization
-  value: Basic YWRtaW46Sk1pVyBhdDZCIE14blIgWTdLayB5b3dNIHlBcVo=
-  type: apiKey
-  in: header
-  duration: 31104000
