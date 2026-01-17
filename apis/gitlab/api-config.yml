@@ -1,7 +1,0 @@
-name: Gitlab
-authenticationCommands:
-  name: Authorization
-  value: Bearer glpat-YKpZMLfO6s-mrignM-JTb286MQp1OjEH.01.0w1328bku
-  type: apiKey
-  in: header
-  duration: 31104000
