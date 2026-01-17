@@ -285,7 +285,7 @@ public abstract class Parameter extends Taggable {
      * Method to retrieve the heading for the JSON string. It was implemented to avoid errors caused by a missing
      * parameter name.
      */
-    protected String getJSONHeading() {
+    public String getJSONHeading() {
         return name == null || name.toString().equals("") ? "" : "\"" + name + "\": ";
     }
 

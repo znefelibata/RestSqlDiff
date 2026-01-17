@@ -162,6 +162,10 @@ public abstract class LeafParameter extends Parameter {
         return value;
     }
 
+    public void setValue(Object value) {
+        this.value = value;
+    }
+
     public void setValueManually(Object value) {
         if (getOperation() != null && getOperation().isReadOnly()) {
             throw new EditReadOnlyOperationException(getOperation());

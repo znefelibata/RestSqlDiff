@@ -66,6 +66,15 @@ public class Operation {
 
     private static final Logger logger = LogManager.getLogger(Operation.class);
 
+    public Operation() {
+        this.endpoint = null;
+        this.method = null;
+        this.operationId = null;
+        this.description = null;
+        this.summary = null;
+        this.rulesToValidate = new HashSet<>();
+    }
+
     @SuppressWarnings("unchecked")
     public Operation(String endpoint, HttpMethod method, Map<String, Object> operationMap) throws InvalidOpenApiException {
         this.endpoint = endpoint;
@@ -241,7 +250,7 @@ public class Operation {
         inferredOperationSemantics = OperationSemantics.inferSemantics(this);
     }
 
-    private Operation(Operation other) {
+    public Operation(Operation other) {
         endpoint = other.endpoint;
         method = HttpMethod.getMethod(other.method.toString());
         operationId = other.operationId;

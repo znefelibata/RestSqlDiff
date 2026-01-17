@@ -203,9 +203,15 @@ public class DatabaseHelper {
                     }
                     queryResults.add(row);
                 }
-                sqlInteraction.setStatus(SqlInteraction.InteractionStatus.SUCCESS);
-                sqlInteraction.setQueryResults(queryResults);
-                sqlInteraction.setRowsAffected(queryResults.size());
+                if (queryResults.isEmpty()) {
+                    sqlInteraction.setStatus(SqlInteraction.InteractionStatus.FAILED);
+                    sqlInteraction.setRowsAffected(0);
+                    sqlInteraction.setQueryResults(Collections.emptyList());
+                } else {
+                    sqlInteraction.setStatus(SqlInteraction.InteractionStatus.SUCCESS);
+                    sqlInteraction.setQueryResults(queryResults);
+                    sqlInteraction.setRowsAffected(queryResults.size());
+                }
             }
         } catch (SQLException e) {
             sqlInteraction.setStatus(SqlInteraction.InteractionStatus.FAILED);

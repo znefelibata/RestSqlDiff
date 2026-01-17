@@ -154,7 +154,13 @@ public class SqlDiffOracle extends Oracle {
 
             // Field-level comparison: only when SQL returned query results and API returned a body
             Map<String, Object> singleReport = new LinkedHashMap<>();
-            singleReport.put("operation", testInteraction.getFuzzedOperation().getOperationId());
+            // Use operationId if available, otherwise fallback to method + endpoint for identification
+            String operationIdentifier = testInteraction.getFuzzedOperation().getOperationId();
+            if (operationIdentifier == null || operationIdentifier.isEmpty()) {
+                operationIdentifier = testInteraction.getFuzzedOperation().getMethod().toString() + "_" +
+                        testInteraction.getFuzzedOperation().getEndpoint();
+            }
+            singleReport.put("operation", operationIdentifier);
             singleReport.put("endpoint", testInteraction.getFuzzedOperation().getEndpoint());
             singleReport.put("method", testInteraction.getFuzzedOperation().getMethod().toString());
             singleReport.put("apiStatus", statusCode.getCode());
@@ -834,7 +840,9 @@ public class SqlDiffOracle extends Oracle {
             }
 
             // 4. Write Log File
-            String logFileName = opId + "_log.txt";
+            // Sanitize opId for file name (remove illegal characters like /)
+            String sanitizedOpId = opId.replaceAll("[^a-zA-Z0-9._-]", "_");
+            String logFileName = sanitizedOpId + "_log.txt";
             StringBuilder logContent = new StringBuilder();
             logContent.append("=== Detailed Interaction Log ===\n");
             logContent.append("Operation ID: ").append(opId).append("\n\n");

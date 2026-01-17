@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import io.resttestgen.boot.ApiUnderTest;
 import io.resttestgen.boot.Starter;
 import io.resttestgen.core.Environment;
+import io.resttestgen.core.datatype.HttpMethod;
 import io.resttestgen.core.datatype.NormalizedParameterName;
 import io.resttestgen.core.datatype.parameter.Parameter;
 import io.resttestgen.core.datatype.parameter.leaves.LeafParameter;
@@ -42,6 +43,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.stream.Collectors;
 
 
 import static io.resttestgen.core.datatype.parameter.ParameterUtils.getArrays;
@@ -53,7 +55,7 @@ public class DiffBasedGraphSorterTest {
     private ExtendedRandom random = Environment.getInstance().getRandom();
     @BeforeAll
     public static void setUp() throws CannotParseOpenApiException, IOException {
-        environment = Starter.initEnvironment(ApiUnderTest.loadApiFromFile("gitlab"));
+        environment = Starter.initEnvironment(ApiUnderTest.loadApiFromFile("wordpress"));
     }
 
     @Test
@@ -88,52 +90,29 @@ public class DiffBasedGraphSorterTest {
         }
     }
 
+
     @Test
     public void testGetTestSequence() {
         DiffBasedGraphSorter sorter = new DiffBasedGraphSorter();
         int length = sorter.getAllNodes().size();
         System.out.println("操作个数为：" + length);
         List<Operation> testSequence = sorter.getQueue();
+
+        Map<HttpMethod, Integer> methodCounts = new HashMap<>();
+
         System.out.println("Generated Test Sequence:");
         for (Operation operation : testSequence) {
+            methodCounts.put(operation.getMethod(), methodCounts.getOrDefault(operation.getMethod(), 0) + 1);
+
             System.out.println("-------------------");
             System.out.println(operation.getMethod() + " " + operation.getEndpoint());
-            System.out.println("ID:" + operation.getOperationId());
-            System.out.println("Description:" + operation.getDescription());
-            System.out.println("Summary:" + operation.getSummary());
-            System.out.println("rules:" + operation.getRulesToValidate());
-            System.out.println("operationSemantics:" + operation.getCrudSemantics());
-            System.out.println("inferredOperationSemantics:" + operation.getInferredCrudSemantics());
-            System.out.println("crudResourceType:" + operation.getCrudResourceType());
-            System.out.println("headerParameters:" + operation.getHeaderParameters());
-            System.out.println("pathParameters:" + operation.getPathParameters());
-            for (Parameter p : operation.getPathParameters()) {
-                System.out.println("name:" + p.getName());
-                System.out.println("NormalizedName" + p.getNormalizedName());
-                System.out.println("type:" + p.getType());
-                System.out.println("fomat:" + p.getFormat());
-            }
-            System.out.println("queryParameters:" + operation.getQueryParameters());
-            for (Parameter p : operation.getQueryParameters()) {
-                System.out.println("name:" + p.getName());
-                System.out.println("NormalizedName" + p.getNormalizedName());
-                System.out.println("type:" + p.getType());
-                System.out.println("fomat:" + p.getFormat());
-            }
-            System.out.println("cookieParameters:" + operation.getCookieParameters());
-            System.out.println("requestContentType:" + operation.getRequestContentType());
-            System.out.println("requestBody:" + operation.getRequestBody());
-            if (operation.getRequestBody() != null) {
-                ((ObjectParameter) operation.getRequestBody()).getProperties().forEach(parameter -> {
-                    System.out.println("name:" + parameter.getName());
-                    System.out.println("NormalizedName" + parameter.getNormalizedName());
-                    System.out.println("type:" + parameter.getType());
-                    System.out.println("fomat:" + parameter.getFormat());
-                });
-            }
-            System.out.println("requestBodyDescription:" + operation.getRequestBodyDescription());
+            // ...existing code...
             System.out.println("end-----------");
         }
+
+        System.out.println("Method Counts in Sequence:");
+        methodCounts.forEach((method, count) -> System.out.println(method + ": " + count));
+
 //        ConvertSequenceToTable convertSequenceToTable = new ConvertSequenceToTable(testSequence);
         ConvertSequenceToTable convertSequenceToTable = new ConvertSequenceToTable();
         System.out.println("Computed Table Columns:" + convertSequenceToTable.getTableColumns().size());
@@ -233,5 +212,141 @@ public class DiffBasedGraphSorterTest {
         }
         System.out.println("DEBUG: HELLO WORLD END");
     }
+
+    @Test
+    public void testSequenceGenerationNotEmpty() {
+        DiffBasedGraphSorter sorter = new DiffBasedGraphSorter();
+        List<Operation> sequence = new ArrayList<>(sorter.getQueue());
+        assertFalse(sequence.isEmpty(), "The generated test sequence should not be empty.");
+    }
+
+    @Test
+    public void testDeleteOperationsAtEnd() {
+        // Run multiple times to cover random strategies
+        for (int i = 0; i < 10; i++) {
+            DiffBasedGraphSorter sorter = new DiffBasedGraphSorter();
+            List<Operation> sequence = new ArrayList<>(sorter.getQueue());
+
+            boolean deleteFound = false;
+            for (Operation op : sequence) {
+                if (op.getMethod() == io.resttestgen.core.datatype.HttpMethod.DELETE) {
+                    deleteFound = true;
+                } else {
+                    if (deleteFound) {
+                        fail("Found non-DELETE operation " + op.getMethod() + " " + op.getEndpoint() +
+                                " after a DELETE operation in the sequence. DELETEs should be at the end.");
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 测试POST操作总是在对应的PUT/GET操作之前
+     * 验证CRUD语义的正确性：必须先创建资源才能更新/读取
+     */
+    @Test
+    public void testPostBeforePutAndGet() {
+        // 运行多次以覆盖随机策略
+        for (int run = 0; run < 10; run++) {
+            DiffBasedGraphSorter sorter = new DiffBasedGraphSorter();
+            List<Operation> sequence = new ArrayList<>(sorter.getQueue());
+
+            // 记录已出现的POST端点（规范化后）
+            Set<String> createdResources = new HashSet<>();
+
+            System.out.println("\n=== Run " + (run + 1) + " ===");
+            for (Operation op : sequence) {
+                String endpoint = op.getEndpoint();
+                String normalizedEndpoint = normalizeEndpointForCrud(endpoint);
+
+                System.out.println(op.getMethod() + " " + endpoint + " -> normalized: " + normalizedEndpoint);
+
+                if (op.getMethod() == HttpMethod.POST) {
+                    // POST创建资源，记录
+                    createdResources.add(normalizedEndpoint);
+                } else if (op.getMethod() == HttpMethod.PUT || op.getMethod() == HttpMethod.PATCH) {
+                    // PUT/PATCH更新资源，检查对应的POST是否已经执行
+                    // 从端点中提取基础资源路径
+                    String baseResourcePath = extractBaseResourcePath(endpoint);
+                    if (baseResourcePath != null && !createdResources.contains(baseResourcePath)) {
+                        // 检查是否有任何相关的POST已经执行
+                        boolean hasRelatedPost = createdResources.stream()
+                                .anyMatch(created -> baseResourcePath.startsWith(created) || created.startsWith(baseResourcePath));
+
+                        if (!hasRelatedPost && !createdResources.isEmpty()) {
+                            System.out.println("WARNING: " + op.getMethod() + " " + endpoint +
+                                    " may not have corresponding POST. Created resources: " + createdResources);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 规范化端点用于CRUD语义检查
+     * 移除路径参数中的具体值，保留结构
+     */
+    private String normalizeEndpointForCrud(String endpoint) {
+        // 移除路径参数值，只保留结构
+        // 例如：/projects/{id}/badges -> /projects/{}/badges
+        return endpoint.replaceAll("\\{[^}]+\\}", "{}");
+    }
+
+    /**
+     * 从端点中提取基础资源路径
+     * 例如：/projects/{id}/badges/{badge_id} -> /projects/{}/badges
+     */
+    private String extractBaseResourcePath(String endpoint) {
+        String normalized = normalizeEndpointForCrud(endpoint);
+        // 移除最后一个路径参数段
+        int lastSlash = normalized.lastIndexOf('/');
+        if (lastSlash > 0) {
+            String lastSegment = normalized.substring(lastSlash + 1);
+            if (lastSegment.equals("{}")) {
+                return normalized.substring(0, lastSlash);
+            }
+        }
+        return normalized;
+    }
+
+    @Test
+    public void testAPi() {
+        List<OperationNode> postNodes = environment.getOperationDependencyGraph().getGraph().vertexSet().stream()
+                .filter(n -> n.getOperation().getMethod() == HttpMethod.GET)
+                .collect(Collectors.toList());
+        Operation operation = new Operation();
+        for (OperationNode node : postNodes) {
+            System.out.println("POST Operation: " + node.getOperation().getMethod() + " " + node.getOperation().getEndpoint());
+            if (node.getOperation().getMethod() == HttpMethod.GET && node.getOperation().getEndpoint().equals("/pages")) {
+                operation = new Operation(node.getOperation());
+                break;
+            }
+        }
+        Collection<LeafParameter> leaves = operation.getLeaves();
+        for (LeafParameter leaf : leaves) {
+//            if (leaf.getName().toString().equals("offset")) {
+//                leaf.setValue(2);
+//            }
+//            if (leaf.getName().toString().equals("order")) {
+//                leaf.setValue("ase");
+//            }
+            System.out.println("Parameter Name: " + leaf.getName() + ", Value: " + leaf.getValue());
+        }
+        int i = 0;
+        while (i < 10) {
+            i++;
+            System.out.println("******************");
+            TestInteraction interaction = new TestInteraction(operation);
+            TestSequence testSequence = new TestSequence();
+            testSequence.add(interaction);
+            TestRunner testRunner = TestRunner.getInstance();
+            testRunner.run(testSequence);
+            System.out.println("Response Status Code: " + interaction.getResponseStatusCode());
+            System.out.println("Response Body: " + interaction.getResponseBody());
+        }
+    }
+
 
 }

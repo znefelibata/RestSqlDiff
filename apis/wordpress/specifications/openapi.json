@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "http://10.176.65.32:81/wp-json/wp/v2"
+      "url": "http://localhost/wp-json/wp/v2"
     }
   ],
   "paths": {
@@ -1295,6 +1295,15 @@
               "type": "integer"
             },
             "description": "Unique identifier for the term."
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "要求为 true，因为项目不能被移动到回收站。",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -1570,6 +1579,15 @@
             },
             "required": true,
             "description": "Unique identifier for the term."
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "要求为 true，因为项目不能被移动到回收站。",
+            "schema": {
+              "type": "boolean"
+            },
+            "required": true
           }
         ],
         "responses": {
@@ -3991,6 +4009,15 @@
               "type": "integer"
             },
             "description": "Reassign the deleted user\u0027s posts and links to this user ID."
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "要求为 true，因为项目不能被移动到回收站。",
+            "schema": {
+              "type": "boolean"
+            },
+            "required": true
           }
         ],
         "responses": {
